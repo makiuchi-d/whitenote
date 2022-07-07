@@ -1,2 +1,2 @@
-Whitenote
-=========
+Whitenote: the whitespace interpriter
+=====================================
