@@ -2,6 +2,7 @@ package wspace
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -38,6 +39,12 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 	defer func() { vm.seg++ }()
 	pos := 0
 	for pos < len(code) {
+		_, p := findWhite(code[pos:])
+		if p < 0 {
+			pos = len(code)
+			break
+		}
+		pos = pos + p
 		c3, read := read3code(code[pos:])
 		if read == 0 {
 			return vm.seg, pos, ErrIncompleteCode
@@ -183,6 +190,37 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 	}
 
 	return vm.seg, pos, nil
+}
+
+// CurrentOpcode returns current opcode.
+func (vm *VM) CurrentOpCode() *OpCode {
+	if vm.PC >= len(vm.Program) {
+		return nil
+	}
+	return &vm.Program[vm.PC]
+}
+
+// Run the program.
+func (vm *VM) Run(ctx context.Context, in io.Reader, out io.Writer) error {
+	b, ok := in.(*bufio.Reader)
+	if !ok {
+		b = bufio.NewReader(in)
+	}
+	for !vm.Terminated {
+		select {
+		case <-ctx.Done():
+			return ErrContextDone
+		default:
+		}
+		err := vm.Step(b, out)
+		if err != nil {
+			if err == ErrNotLoaded {
+				break
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // Step runs an opecode.
