@@ -19,7 +19,7 @@ type VM struct {
 	Heap       map[int]int
 	CallStack  []int
 
-	seg int // segment number to be loaded
+	Seg int // segment number to be loaded
 }
 
 // InputReader is the stdin interface for Step()
@@ -42,8 +42,12 @@ func New() *VM {
 // Load loads code segment to VM
 // return: segment number, read size, error
 func (vm *VM) Load(code []byte) (int, int, error) {
-	defer func() { vm.seg++ }()
 	pos := 0
+	defer func() {
+		if pos > 0 {
+			vm.Seg++
+		}
+	}()
 	for pos < len(code) {
 		_, p := findWhite(code[pos:])
 		if p < 0 {
@@ -53,13 +57,13 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		pos += p
 		c3, read := read3code(code[pos:])
 		if read == 0 {
-			return vm.seg, pos, ErrIncompleteCode
+			return vm.Seg, pos, ErrIncompleteCode
 		}
 		switch c3 {
 		case "   ", "  \t": // Push number
 			n, r, err := readNum(code[pos+read-1:]) // contains last white.
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r - 1
 			vm.appendOpCodeNumber(Push, n, pos)
@@ -69,7 +73,7 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		case " \t ": // Copy
 			n, r, err := readNum(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r
 			vm.appendOpCodeNumber(Copy, n, pos)
@@ -82,14 +86,14 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		case " \t\n": // Slide
 			n, r, err := readNum(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r
 			vm.appendOpCodeNumber(Slide, n, pos)
 		case "\t  ": // Add, Sub, Mul
 			c, p := findWhite(code[pos+read:])
 			if p < 0 {
-				return vm.seg, pos, ErrIncompleteCode
+				return vm.Seg, pos, ErrIncompleteCode
 			}
 			read += p + 1
 			switch c {
@@ -103,7 +107,7 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		case "\t \t": // Div, Mod
 			c, p := findWhite(code[pos+read:])
 			if p < 0 {
-				return vm.seg, pos, ErrIncompleteCode
+				return vm.Seg, pos, ErrIncompleteCode
 			}
 			read += p + 1
 			switch c {
@@ -112,7 +116,7 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 			case '\t':
 				vm.appendOpCode(Mod, pos)
 			case '\n':
-				return vm.seg, pos, ErrInvalidCode
+				return vm.Seg, pos, ErrInvalidCode
 			}
 		case "\t\t ": // Store
 			vm.appendOpCode(Store, pos)
@@ -121,10 +125,10 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		case "\n  ": // Mark
 			l, r, err := readLabel(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			if _, exists := vm.Labels[l]; exists {
-				return vm.seg, pos, ErrDuplicateLabel
+				return vm.Seg, pos, ErrDuplicateLabel
 			}
 			read += r
 			vm.Labels[l] = len(vm.Program)
@@ -132,28 +136,28 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		case "\n \t": // Call
 			l, r, err := readLabel(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r
 			vm.appendOpCodeLabel(Call, l, pos)
 		case "\n \n": // Jump
 			l, r, err := readLabel(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r
 			vm.appendOpCodeLabel(Jump, l, pos)
 		case "\n\t ": // JZero
 			l, r, err := readLabel(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r
 			vm.appendOpCodeLabel(JZero, l, pos)
 		case "\n\t\t": // JNeg
 			l, r, err := readLabel(code[pos+read:])
 			if err != nil {
-				return vm.seg, pos, err
+				return vm.Seg, pos, err
 			}
 			read += r
 			vm.appendOpCodeLabel(JNeg, l, pos)
@@ -164,7 +168,7 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 		case "\t\n ": // WriteChar, WriteNum
 			c, p := findWhite(code[pos+read:])
 			if p < 0 {
-				return vm.seg, pos, ErrIncompleteCode
+				return vm.Seg, pos, ErrIncompleteCode
 			}
 			read += p + 1
 			switch c {
@@ -173,12 +177,12 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 			case '\t':
 				vm.appendOpCode(WriteNum, pos)
 			default:
-				return vm.seg, pos, ErrInvalidCode
+				return vm.Seg, pos, ErrInvalidCode
 			}
 		case "\t\n\t": // ReadChar, ReadNum
 			c, p := findWhite(code[pos+read:])
 			if p < 0 {
-				return vm.seg, pos, ErrIncompleteCode
+				return vm.Seg, pos, ErrIncompleteCode
 			}
 			read += p + 1
 			switch c {
@@ -187,15 +191,15 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 			case '\t':
 				vm.appendOpCode(ReadNum, pos)
 			default:
-				return vm.seg, pos, ErrInvalidCode
+				return vm.Seg, pos, ErrInvalidCode
 			}
 		default:
-			return vm.seg, pos, ErrInvalidCode
+			return vm.Seg, pos, ErrInvalidCode
 		}
 		pos += read
 	}
 
-	return vm.seg, pos, nil
+	return vm.Seg, pos, nil
 }
 
 // CurrentOpcode returns current opcode.
@@ -475,15 +479,15 @@ func (vm *VM) Step(in InputReader, out io.Writer) error {
 }
 
 func (vm *VM) appendOpCode(cmd Command, pos int) {
-	vm.Program = append(vm.Program, OpCode{Cmd: cmd, Seg: vm.seg, Pos: pos})
+	vm.Program = append(vm.Program, OpCode{Cmd: cmd, Seg: vm.Seg, Pos: pos})
 }
 
 func (vm *VM) appendOpCodeNumber(cmd Command, n int, pos int) {
-	vm.Program = append(vm.Program, OpCode{Cmd: cmd, Param: n, Seg: vm.seg, Pos: pos})
+	vm.Program = append(vm.Program, OpCode{Cmd: cmd, Param: n, Seg: vm.Seg, Pos: pos})
 }
 
 func (vm *VM) appendOpCodeLabel(cmd Command, label string, pos int) {
-	vm.Program = append(vm.Program, OpCode{Cmd: cmd, Param: label, Seg: vm.seg, Pos: pos})
+	vm.Program = append(vm.Program, OpCode{Cmd: cmd, Param: label, Seg: vm.Seg, Pos: pos})
 }
 
 func findWhite(code []byte) (byte, int) {

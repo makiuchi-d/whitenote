@@ -1,5 +1,7 @@
 package wspace
 
+import "fmt"
+
 // OpCode is an operation code contains the command and its parameter, and the position of the definition on the loaded code segment.
 type OpCode struct {
 	Cmd   Command
@@ -55,3 +57,11 @@ const (
 	ReadChar  // [Tab][LF][Tab][Space] - : Read a character and place it in the location given by the top of the stack
 	ReadNum   // [Tab][LF][Tab][Tab] - : Read a number and place it in the location given by the top of the stack
 )
+
+func (op OpCode) String() string {
+	param := ""
+	if op.Param != nil {
+		param = fmt.Sprintf(" %#v", op.Param)
+	}
+	return fmt.Sprintf("(%v:%v) %s%s", op.Seg, op.Pos, op.Cmd, param)
+}
