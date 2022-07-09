@@ -1,10 +1,8 @@
 package wspace
 
 import (
-	"bufio"
 	"bytes"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -245,7 +243,7 @@ func TestIO(t *testing.T) {
 	vm := New()
 
 	// input
-	r := bufio.NewReader(strings.NewReader("a123\n"))
+	r := bytes.NewBufferString("a123\n")
 	vm.Program = []OpCode{{Cmd: ReadChar}, {Cmd: ReadNum}}
 	vm.Stack = []int{1, 0}
 

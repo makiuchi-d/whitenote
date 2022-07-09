@@ -22,6 +22,12 @@ type VM struct {
 	seg int // segment number to be loaded
 }
 
+// InputReader is the stdin interface for Step()
+type InputReader interface {
+	io.Reader
+	io.ByteReader
+}
+
 // New VM
 func New() *VM {
 	return &VM{
@@ -44,7 +50,7 @@ func (vm *VM) Load(code []byte) (int, int, error) {
 			pos = len(code)
 			break
 		}
-		pos = pos + p
+		pos += p
 		c3, read := read3code(code[pos:])
 		if read == 0 {
 			return vm.seg, pos, ErrIncompleteCode
@@ -202,7 +208,7 @@ func (vm *VM) CurrentOpCode() *OpCode {
 
 // Run the program.
 func (vm *VM) Run(ctx context.Context, in io.Reader, out io.Writer) error {
-	b, ok := in.(*bufio.Reader)
+	b, ok := in.(InputReader)
 	if !ok {
 		b = bufio.NewReader(in)
 	}
@@ -224,7 +230,7 @@ func (vm *VM) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 }
 
 // Step runs an opecode.
-func (vm *VM) Step(in *bufio.Reader, out io.Writer) error {
+func (vm *VM) Step(in InputReader, out io.Writer) error {
 	if vm.Terminated {
 		return ErrTerminated
 	}
