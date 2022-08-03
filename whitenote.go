@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -174,17 +175,15 @@ func newHeader(msgtype string) []byte {
 	return hdr
 }
 
-func (s *Sockets) sendState(parent *Message, state []byte) {
-	hdr := newHeader("status")
+func (s *Sockets) send(sock *zmq4.Socket, parent *Message, msgtype string, content []byte) {
+	hdr := newHeader(msgtype)
 	phdr := parent.Header
-	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, state)
-	_, _ = s.iopub.SendMessage(
-		delimiter,
-		mac,
-		hdr,
-		phdr,
-		metadata,
-		state)
+	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, content)
+	_, _ = sock.SendMessage(delimiter, mac, hdr, phdr, metadata, content)
+}
+
+func (s *Sockets) sendState(parent *Message, state []byte) {
+	s.send(s.iopub, parent, "status", state)
 }
 
 func (s *Sockets) sendStdout(parent *Message, output string) {
@@ -192,19 +191,18 @@ func (s *Sockets) sendStdout(parent *Message, output string) {
 		"name": "stdout",
 		"text": output,
 	})
-	hdr := newHeader("stream")
-	phdr := parent.Header
-	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, content)
-	_, _ = s.iopub.SendMessage(
-		delimiter,
-		mac,
-		hdr,
-		phdr,
-		metadata,
-		content)
+	s.send(s.iopub, parent, "stream", content)
 }
 
-func (s *Sockets) sendRouter(sock *zmq4.Socket, msgtype string, parent *Message, content []byte) {
+func (s *Sockets) sendStderr(parent *Message, output string) {
+	content, _ := json.Marshal(map[string]string{
+		"name": "stderr",
+		"text": output,
+	})
+	s.send(s.iopub, parent, "stream", content)
+}
+
+func (s *Sockets) sendRouter(sock *zmq4.Socket, parent *Message, msgtype string, content []byte) {
 	hdr := newHeader(msgtype)
 	phdr := parent.Header
 	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, content)
@@ -221,9 +219,55 @@ func (s *Sockets) sendRouter(sock *zmq4.Socket, msgtype string, parent *Message,
 	_, _ = sock.SendMessage(data...)
 }
 
-func (s *Sockets) sendExecuteReply(sock *zmq4.Socket, parent *Message, count int) {
-	content := fmt.Sprintf(`{"status":"ok","execution_count":%d}`, count)
-	s.sendRouter(sock, "execute_reply", parent, []byte(content))
+func (s *Sockets) sendExecuteReply(sock *zmq4.Socket, parent *Message, status string, count int) {
+	content := fmt.Sprintf(`{"status":"%s","execution_count":%d}`, status, count)
+	s.sendRouter(sock, parent, "execute_reply", []byte(content))
+}
+
+func (s *Sockets) getStdin(parent *Message) ([]byte, error) {
+	s.sendRouter(s.stdin, parent, "input_request", []byte(`{"prompt":"> ","password":false}`))
+	msg, err := s.recvRouterMessage(s.stdin)
+	if err != nil {
+		return nil, err
+	}
+	var d map[string]string
+	_ = json.Unmarshal(msg.Content, &d)
+	return append([]byte(d["value"]), '\n'), nil
+}
+
+type stdinReader struct {
+	socks  *Sockets
+	parent *Message
+	stdout *bytes.Buffer
+	buf    []byte
+}
+
+func (i *stdinReader) Read(p []byte) (int, error) {
+	if out := i.stdout.Bytes(); len(out) > 0 {
+		i.socks.sendStdout(i.parent, string(out))
+		i.stdout.Reset()
+	}
+
+	buf := i.buf
+	if len(buf) == 0 {
+		b, err := i.socks.getStdin(i.parent)
+		if err != nil {
+			return 0, err
+		}
+		buf = b
+	}
+	n := copy(p, buf)
+	i.buf = buf[n:]
+	return n, nil
+}
+
+func (i *stdinReader) ReadByte() (byte, error) {
+	p := make([]byte, 1)
+	n, err := i.Read(p)
+	if n != 1 || err != nil {
+		return 0, fmt.Errorf("ReadByte: n=%v err=%v", n, err)
+	}
+	return p[0], nil
 }
 
 func (s *Sockets) shellHandler(vm *wspace.VM) {
@@ -244,14 +288,39 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 		switch hdr["msg_type"] {
 
 		case "kernel_info_request":
-			s.sendRouter(s.shell, "kernel_info_reply", msg, kernelInfo)
+			s.sendRouter(s.shell, msg, "kernel_info_reply", kernelInfo)
 			s.sendState(msg, stateIdle)
 
 		case "execute_request":
-			execCount++
 			s.sendState(msg, stateBusy)
-			s.sendStdout(msg, "whitenote!!")
-			s.sendExecuteReply(s.shell, msg, execCount)
+			execCount++
+
+			vm.PC = len(vm.Program)
+			vm.Terminated = false
+
+			var content map[string]any
+			_ = json.Unmarshal(msg.Content, &content)
+			_, pos, err := vm.Load([]byte(content["code"].(string)))
+			if err != nil {
+				s.sendStderr(msg, fmt.Sprintf("%v: %v", pos, err.Error()))
+				s.sendExecuteReply(s.shell, msg, "error", execCount)
+				s.sendState(msg, stateIdle)
+				continue
+			}
+
+			out := new(bytes.Buffer)
+			in := &stdinReader{socks: s, parent: msg, stdout: out}
+			err = vm.Run(context.Background(), in, out)
+			if err != nil {
+				op := vm.CurrentOpCode()
+				s.sendStderr(msg, fmt.Sprintf("%v: %v: %v", op.Pos, op.Cmd, err.Error()))
+				s.sendExecuteReply(s.shell, msg, "error", execCount)
+				s.sendState(msg, stateIdle)
+				continue
+			}
+			s.sendStdout(msg, string(out.Bytes()))
+
+			s.sendExecuteReply(s.shell, msg, "ok", execCount)
 			s.sendState(msg, stateIdle)
 		}
 	}
