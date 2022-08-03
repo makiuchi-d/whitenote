@@ -25,13 +25,6 @@ const (
 )
 
 var (
-	conf    *ConnectionInfo
-	shell   *zmq4.Socket
-	control *zmq4.Socket
-	stdin   *zmq4.Socket
-	iopub   *zmq4.Socket
-	hb      *zmq4.Socket
-
 	sessionId  string
 	kernelInfo []byte
 
@@ -60,6 +53,15 @@ func init() {
 		},
 		"banner": "",
 	})
+}
+
+type Sockets struct {
+	conf    *ConnectionInfo
+	shell   *zmq4.Socket
+	control *zmq4.Socket
+	stdin   *zmq4.Socket
+	iopub   *zmq4.Socket
+	hb      *zmq4.Socket
 }
 
 type ConnectionInfo struct {
@@ -104,6 +106,17 @@ func bindSocket(typ zmq4.Type, transport, ip string, port int) *zmq4.Socket {
 	return sock
 }
 
+func newSockets(conf *ConnectionInfo) *Sockets {
+	return &Sockets{
+		conf:    conf,
+		shell:   bindSocket(zmq4.ROUTER, conf.Transport, conf.IP, conf.ShellPort),
+		control: bindSocket(zmq4.ROUTER, conf.Transport, conf.IP, conf.ControlPort),
+		stdin:   bindSocket(zmq4.ROUTER, conf.Transport, conf.IP, conf.StdinPort),
+		iopub:   bindSocket(zmq4.PUB, conf.Transport, conf.IP, conf.IOPubPort),
+		hb:      bindSocket(zmq4.REP, conf.Transport, conf.IP, conf.HBPort),
+	}
+}
+
 func calcHMAC(key string, header, parent, metadata, content []byte) string {
 	h := hmac.New(sha256.New, []byte(key))
 	h.Write(header)
@@ -113,7 +126,7 @@ func calcHMAC(key string, header, parent, metadata, content []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func recvRouterMessage(sock *zmq4.Socket) (*Message, error) {
+func (s *Sockets) recvRouterMessage(sock *zmq4.Socket) (*Message, error) {
 	mb, err := sock.RecvMessageBytes(0)
 	if err != nil {
 		return nil, err
@@ -139,7 +152,7 @@ func recvRouterMessage(sock *zmq4.Socket) (*Message, error) {
 	}
 
 	sig := string(mb[d+1])
-	mac := calcHMAC(conf.Key, msg.Header, msg.Parent, msg.Metadata, msg.Content)
+	mac := calcHMAC(s.conf.Key, msg.Header, msg.Parent, msg.Metadata, msg.Content)
 	if sig != mac {
 		return msg, fmt.Errorf("invalid hmac: %v %v", sig, mb)
 	}
@@ -161,11 +174,11 @@ func newHeader(msgtype string) []byte {
 	return hdr
 }
 
-func sendState(parent *Message, state []byte) {
+func (s *Sockets) sendState(parent *Message, state []byte) {
 	hdr := newHeader("status")
 	phdr := parent.Header
-	mac := calcHMAC(conf.Key, hdr, phdr, metadata, state)
-	_, _ = iopub.SendMessage(
+	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, state)
+	_, _ = s.iopub.SendMessage(
 		delimiter,
 		mac,
 		hdr,
@@ -174,15 +187,15 @@ func sendState(parent *Message, state []byte) {
 		state)
 }
 
-func sendStdout(parent *Message, output string) {
+func (s *Sockets) sendStdout(parent *Message, output string) {
 	content, _ := json.Marshal(map[string]string{
 		"name": "stdout",
 		"text": output,
 	})
 	hdr := newHeader("stream")
 	phdr := parent.Header
-	mac := calcHMAC(conf.Key, hdr, phdr, metadata, content)
-	_, _ = iopub.SendMessage(
+	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, content)
+	_, _ = s.iopub.SendMessage(
 		delimiter,
 		mac,
 		hdr,
@@ -191,10 +204,10 @@ func sendStdout(parent *Message, output string) {
 		content)
 }
 
-func sendRouter(sock *zmq4.Socket, msgtype string, parent *Message, content []byte) {
+func (s *Sockets) sendRouter(sock *zmq4.Socket, msgtype string, parent *Message, content []byte) {
 	hdr := newHeader(msgtype)
 	phdr := parent.Header
-	mac := calcHMAC(conf.Key, hdr, phdr, metadata, content)
+	mac := calcHMAC(s.conf.Key, hdr, phdr, metadata, content)
 	data := make([]any, 0, len(parent.ZmqID)+6)
 	for _, p := range parent.ZmqID {
 		data = append(data, p)
@@ -208,9 +221,15 @@ func sendRouter(sock *zmq4.Socket, msgtype string, parent *Message, content []by
 	_, _ = sock.SendMessage(data...)
 }
 
-func shellHandler(vm *wspace.VM) {
+func (s *Sockets) sendExecuteReply(sock *zmq4.Socket, parent *Message, count int) {
+	content := fmt.Sprintf(`{"status":"ok","execution_count":%d}`, count)
+	s.sendRouter(sock, "execute_reply", parent, []byte(content))
+}
+
+func (s *Sockets) shellHandler(vm *wspace.VM) {
+	execCount := 0
 	for {
-		msg, err := recvRouterMessage(shell)
+		msg, err := s.recvRouterMessage(s.shell)
 		if err != nil {
 			log.Printf("shell: recv: %v", err)
 			continue
@@ -223,20 +242,24 @@ func shellHandler(vm *wspace.VM) {
 
 		log.Println("shell:", hdr["msg_type"], string(msg.Content))
 		switch hdr["msg_type"] {
+
 		case "kernel_info_request":
-			sendRouter(shell, "kernel_info_reply", msg, kernelInfo)
-			sendState(msg, stateIdle)
+			s.sendRouter(s.shell, "kernel_info_reply", msg, kernelInfo)
+			s.sendState(msg, stateIdle)
+
 		case "execute_request":
-			sendState(msg, stateBusy)
-			sendStdout(msg, "whitenote!!")
-			sendState(msg, stateIdle)
+			execCount++
+			s.sendState(msg, stateBusy)
+			s.sendStdout(msg, "whitenote!!")
+			s.sendExecuteReply(s.shell, msg, execCount)
+			s.sendState(msg, stateIdle)
 		}
 	}
 }
 
-func controlHandler(shutdown chan<- struct{}) {
+func (s *Sockets) controlHandler(shutdown chan<- struct{}) {
 	for {
-		msg, err := recvRouterMessage(shell)
+		msg, err := s.recvRouterMessage(s.control)
 		if err != nil {
 			log.Printf("control: recv: %v", err)
 			continue
@@ -255,11 +278,11 @@ func controlHandler(shutdown chan<- struct{}) {
 	}
 }
 
-func hbHandler() {
+func (s *Sockets) hbHandler() {
 	for {
-		msg, err := hb.Recv(0)
+		msg, err := s.hb.Recv(0)
 		if err == nil {
-			_, err = hb.Send(msg, 0)
+			_, err = s.hb.Send(msg, 0)
 		}
 		log.Printf("heartbeat: %v (%v)", msg, err)
 	}
@@ -270,20 +293,15 @@ func main() {
 		log.Println("need connectioninfo file")
 		return
 	}
-	conf = readConf(os.Args[1])
-
-	shell = bindSocket(zmq4.ROUTER, conf.Transport, conf.IP, conf.ShellPort)
-	control = bindSocket(zmq4.ROUTER, conf.Transport, conf.IP, conf.ControlPort)
-	stdin = bindSocket(zmq4.ROUTER, conf.Transport, conf.IP, conf.StdinPort)
-	iopub = bindSocket(zmq4.PUB, conf.Transport, conf.IP, conf.IOPubPort)
-	hb = bindSocket(zmq4.REP, conf.Transport, conf.IP, conf.HBPort)
+	conf := readConf(os.Args[1])
+	socks := newSockets(conf)
 
 	vm := wspace.New()
 	shutdown := make(chan struct{}, 1)
 
-	go shellHandler(vm)
-	go controlHandler(shutdown)
-	go hbHandler()
+	go socks.shellHandler(vm)
+	go socks.controlHandler(shutdown)
+	go socks.hbHandler()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
