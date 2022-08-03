@@ -219,6 +219,14 @@ func (s *Sockets) sendRouter(sock *zmq4.Socket, parent *Message, msgtype string,
 	_, _ = sock.SendMessage(data...)
 }
 
+func (s *Sockets) sendCompleteReply(sock *zmq4.Socket, req *Message) {
+	var content map[string]any
+	_ = json.Unmarshal(req.Content, &content)
+	pos := int(content["cursor_pos"].(float64))
+	rep := fmt.Sprintf(`{"status":"ok","matches":["\t"],"cursor_start":%d,"cursor_end":%d,"metadata":{}}`, pos, pos)
+	s.sendRouter(s.shell, req, "complete_reply", []byte(rep))
+}
+
 func (s *Sockets) sendExecuteReply(sock *zmq4.Socket, parent *Message, status string, count int) {
 	content := fmt.Sprintf(`{"status":"%s","execution_count":%d}`, status, count)
 	s.sendRouter(sock, parent, "execute_reply", []byte(content))
@@ -289,6 +297,11 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 
 		case "kernel_info_request":
 			s.sendRouter(s.shell, msg, "kernel_info_reply", kernelInfo)
+			s.sendState(msg, stateIdle)
+
+		case "complete_request":
+			s.sendState(msg, stateBusy)
+			s.sendCompleteReply(s.shell, msg)
 			s.sendState(msg, stateIdle)
 
 		case "execute_request":
