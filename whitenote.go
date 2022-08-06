@@ -46,7 +46,7 @@ func init() {
 		"language_info": map[string]any{
 			"name":               "whitespace",
 			"version":            "0.1",
-			"mimetype":           "", //text/x-whitespace",
+			"mimetype":           "text/x-whitespace",
 			"file_extension":     ".ws",
 			"pygments_lexer":     "",
 			"codemirror_mode":    "",
@@ -233,7 +233,7 @@ func (s *Sockets) sendExecuteReply(sock *zmq4.Socket, parent *Message, status st
 }
 
 func (s *Sockets) getStdin(parent *Message) ([]byte, error) {
-	s.sendRouter(s.stdin, parent, "input_request", []byte(`{"prompt":">","password":false}`))
+	s.sendRouter(s.stdin, parent, "input_request", []byte(`{"prompt":"","password":false}`))
 	msg, err := s.recvRouterMessage(s.stdin)
 	if err != nil {
 		return nil, err
