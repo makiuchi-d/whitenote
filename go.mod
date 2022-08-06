@@ -1,6 +1,6 @@
 module github.com/makiuchi-d/whitenote
 
-go 1.18
+go 1.19
 
 require (
 	github.com/google/uuid v1.3.0

@@ -378,7 +378,7 @@ func (s *Sockets) hbHandler() {
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Println("need connectioninfo file")
+		log.Println("need connection file")
 		return
 	}
 	conf := readConf(os.Args[1])
