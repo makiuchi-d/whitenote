@@ -36,6 +36,7 @@ func New() *VM {
 		Stack:     make([]int, 0),
 		Heap:      make(map[int]int),
 		CallStack: make([]int, 0),
+		Seg:       1,
 	}
 }
 
