@@ -1,7 +1,7 @@
 whitenote - The whitespace kernel for Jupyter
 =============================================
 
-`whitenote` is a whitespace kernel for Jupyter.
+`whitenote` is a [whitespace](https://web.archive.org/web/20150523181043/http://compsoc.dur.ac.uk/whitespace/index.php) kernel for [Jupyter](https://jupyter.org/).
 
 ![](jupyter.gif)
 
