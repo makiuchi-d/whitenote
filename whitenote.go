@@ -16,8 +16,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/makiuchi-d/whitenote/wspace"
 	"github.com/pebbe/zmq4"
+
+	"github.com/makiuchi-d/whitenote/wspace"
 )
 
 const (
@@ -278,6 +279,10 @@ func (i *stdinReader) ReadByte() (byte, error) {
 	return p[0], nil
 }
 
+func lineNum(code []byte, pos int) int {
+	return bytes.Count(code[:pos], []byte{'\n'}) + 1
+}
+
 func (s *Sockets) shellHandler(vm *wspace.VM) {
 	execCount := 0
 	for {
@@ -313,9 +318,10 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 
 			var content map[string]any
 			_ = json.Unmarshal(msg.Content, &content)
-			_, pos, err := vm.Load([]byte(content["code"].(string)))
+			code := []byte(content["code"].(string))
+			_, pos, err := vm.Load(code)
 			if err != nil {
-				s.sendStderr(msg, fmt.Sprintf("%v: %v", pos, err.Error()))
+				s.sendStderr(msg, fmt.Sprintf("%v: %v", lineNum(code, pos), err.Error()))
 				s.sendExecuteReply(s.shell, msg, "error", execCount)
 				s.sendState(msg, stateIdle)
 				continue
@@ -326,7 +332,7 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 			err = vm.Run(context.Background(), in, out)
 			if err != nil {
 				op := vm.CurrentOpCode()
-				s.sendStderr(msg, fmt.Sprintf("%v: %v: %v", op.Pos, op.Cmd, err.Error()))
+				s.sendStderr(msg, fmt.Sprintf("%v: %v: %v", lineNum(code, op.Pos), op.Cmd, err.Error()))
 				s.sendExecuteReply(s.shell, msg, "error", execCount)
 				s.sendState(msg, stateIdle)
 				continue
