@@ -227,8 +227,14 @@ func (s *Sockets) sendCompleteReply(sock *zmq4.Socket, req *Message) {
 	s.sendRouter(s.shell, req, "complete_reply", []byte(rep))
 }
 
-func (s *Sockets) sendExecuteReply(sock *zmq4.Socket, parent *Message, status string, count int) {
-	content := fmt.Sprintf(`{"status":"%s","execution_count":%d}`, status, count)
+func (s *Sockets) sendExecuteOKReply(sock *zmq4.Socket, parent *Message, count int) {
+	content := fmt.Sprintf(`{"status":"ok","execution_count":%d}`, count)
+	s.sendRouter(sock, parent, "execute_reply", []byte(content))
+}
+
+func (s *Sockets) sendExecuteErrorReply(sock *zmq4.Socket, parent *Message, count int, err error) {
+	content := fmt.Sprintf(
+		`{"status":"error","execution_count":%d,"ename":"%T","evalue":"%s","traceback":[]}`, count, err, err)
 	s.sendRouter(sock, parent, "execute_reply", []byte(content))
 }
 
@@ -321,7 +327,7 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 			_, pos, err := vm.Load(code)
 			if err != nil {
 				s.sendStderr(msg, fmt.Sprintf("%v: %v", lineNum(code, pos), err.Error()))
-				s.sendExecuteReply(s.shell, msg, "error", execCount)
+				s.sendExecuteErrorReply(s.shell, msg, execCount, err)
 				s.sendState(msg, stateIdle)
 				continue
 			}
@@ -332,13 +338,13 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 			if err != nil {
 				op := vm.CurrentOpCode()
 				s.sendStderr(msg, fmt.Sprintf("%v: %v: %v", lineNum(code, op.Pos), op.Cmd, err.Error()))
-				s.sendExecuteReply(s.shell, msg, "error", execCount)
+				s.sendExecuteErrorReply(s.shell, msg, execCount, err)
 				s.sendState(msg, stateIdle)
 				continue
 			}
 			s.sendStdout(msg, string(out.Bytes()))
 
-			s.sendExecuteReply(s.shell, msg, "ok", execCount)
+			s.sendExecuteOKReply(s.shell, msg, execCount)
 			s.sendState(msg, stateIdle)
 		}
 	}
