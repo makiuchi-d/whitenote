@@ -4,6 +4,5 @@
         "{connection_file}"
     ],
     "display_name": "Whitespace",
-    "language": "whitespace",
-    "name": "whitenote"
+    "language": "whitespace"
 }
