@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -22,8 +21,8 @@ import (
 )
 
 const (
-	delimiter = "<IDS|MSG>"
-	protoVer  = "5.3"
+	delimiter   = "<IDS|MSG>"
+	protocolVer = "5.3"
 )
 
 var (
@@ -41,9 +40,9 @@ func init() {
 
 	kernelInfo, _ = json.Marshal(map[string]any{
 		"status":                 "ok",
-		"protocol_version":       protoVer,
+		"protocol_version":       protocolVer,
 		"implementation":         "whitenote",
-		"implementation_version": "0.1",
+		"implementation_version": "1.0.1",
 		"language_info": map[string]any{
 			"name":               "whitespace",
 			"version":            "0.1",
@@ -84,11 +83,11 @@ type Message struct {
 	Parent   []byte
 	Metadata []byte
 	Content  []byte
-	Extra    [][]byte
+	Buffers  [][]byte
 }
 
 func readConf(file string) *ConnectionInfo {
-	c, err := ioutil.ReadFile(file)
+	c, err := os.ReadFile(file)
 	if err != nil {
 		panic(err)
 	}
@@ -150,7 +149,7 @@ func (s *Sockets) recvRouterMessage(sock *zmq4.Socket) (*Message, error) {
 		Parent:   mb[d+3],
 		Metadata: mb[d+4],
 		Content:  mb[d+5],
-		Extra:    mb[d+6:],
+		Buffers:  mb[d+6:],
 	}
 
 	sig := string(mb[d+1])
@@ -170,7 +169,7 @@ func newHeader(msgtype string) []byte {
 		"username": "kernel",
 		"session":  sessionId,
 		"msg_type": msgtype,
-		"version":  protoVer,
+		"version":  protocolVer,
 	}
 	hdr, _ := json.Marshal(h)
 	return hdr
@@ -367,13 +366,7 @@ func (s *Sockets) controlHandler(shutdown chan<- struct{}) {
 }
 
 func (s *Sockets) hbHandler() {
-	for {
-		msg, err := s.hb.Recv(0)
-		if err == nil {
-			_, err = s.hb.Send(msg, 0)
-		}
-		log.Printf("heartbeat: %v (%v)", msg, err)
-	}
+	zmq4.Proxy(s.hb, s.hb, nil)
 }
 
 func main() {
