@@ -27,10 +27,10 @@ The whitespace interpreter (VM) is provided as the package `github.com/makiuchi-
 
 ### REPL binary
 
-#### Build
+#### Install
 
 ```
-go build -o bin/wspace wspace/cmd/main.go
+go install github.com/makiuchi-d/whitenote/wspace/cmd/wspace@latest
 ```
 
 #### Usage
