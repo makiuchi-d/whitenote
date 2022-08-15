@@ -42,7 +42,7 @@ func init() {
 		"status":                 "ok",
 		"protocol_version":       protocolVer,
 		"implementation":         "whitenote",
-		"implementation_version": "1.0.1",
+		"implementation_version": "1.1.0",
 		"language_info": map[string]any{
 			"name":               "whitespace",
 			"version":            "0.1",
@@ -232,10 +232,15 @@ func (s *Sockets) sendExecuteOKReply(sock *zmq4.Socket, parent *Message, count i
 	s.sendRouter(sock, parent, "execute_reply", []byte(content))
 }
 
-func (s *Sockets) sendExecuteErrorReply(sock *zmq4.Socket, parent *Message, count int, err error) {
-	content := fmt.Sprintf(
-		`{"status":"error","execution_count":%d,"ename":"%T","evalue":"%s","traceback":[]}`, count, err, err)
-	s.sendRouter(sock, parent, "execute_reply", []byte(content))
+func (s *Sockets) sendExecuteErrorReply(sock *zmq4.Socket, parent *Message, count int, ename, evalue string) {
+	content, _ := json.Marshal(map[string]any{
+		"status":          "error",
+		"execution_count": count,
+		"ename":           ename,
+		"evalue":          evalue,
+		"traceback":       []any{},
+	})
+	s.sendRouter(sock, parent, "execute_reply", content)
 }
 
 func (s *Sockets) getStdin(parent *Message) ([]byte, error) {
@@ -327,7 +332,7 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 			_, pos, err := vm.Load(code)
 			if err != nil {
 				s.sendStderr(msg, fmt.Sprintf("%v: %v", lineNum(code, pos), err.Error()))
-				s.sendExecuteErrorReply(s.shell, msg, execCount, err)
+				s.sendExecuteErrorReply(s.shell, msg, execCount, "LoadingError", err.Error())
 				s.sendState(msg, stateIdle)
 				continue
 			}
@@ -335,14 +340,16 @@ func (s *Sockets) shellHandler(vm *wspace.VM) {
 			out := new(bytes.Buffer)
 			in := &stdinReader{socks: s, parent: msg, stdout: out}
 			err = vm.Run(context.Background(), in, out)
+			if len(out.Bytes()) > 0 {
+				s.sendStdout(msg, string(out.Bytes()))
+			}
 			if err != nil {
 				op := vm.CurrentOpCode()
 				s.sendStderr(msg, fmt.Sprintf("%v: %v: %v", lineNum(code, op.Pos), op.Cmd, err.Error()))
-				s.sendExecuteErrorReply(s.shell, msg, execCount, err)
+				s.sendExecuteErrorReply(s.shell, msg, execCount, "RuntimeError", err.Error())
 				s.sendState(msg, stateIdle)
 				continue
 			}
-			s.sendStdout(msg, string(out.Bytes()))
 
 			s.sendExecuteOKReply(s.shell, msg, execCount)
 			s.sendState(msg, stateIdle)
