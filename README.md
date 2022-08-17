@@ -23,7 +23,7 @@ jupyter kernelspec install --name=whitenote --user ./kernel
 
 ## Whitespace interpreter
 
-The whitespace interpreter (VM) is provided as the package `github.com/makiuchi-d/whitenote/wspace`.
+The whitespace interpreter (VM) is provided in the package `github.com/makiuchi-d/whitenote/wspace`.
 
 ### REPL binary
 

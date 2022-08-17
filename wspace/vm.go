@@ -1,3 +1,7 @@
+// wspace package provides [whitespace] virtual machine.
+//
+// [whitespace]: https://web.archive.org/web/20150618184706/http://compsoc.dur.ac.uk/whitespace/
+//
 package wspace
 
 import (
@@ -10,14 +14,15 @@ import (
 
 // VM whitespace virtual machine.
 type VM struct {
-	Program []OpCode
+	Program []OpCode // loaded program
 	Labels  map[string]int
 
-	Terminated bool
-	PC         int
-	Stack      []int
-	Heap       map[int]int
-	CallStack  []int
+	Terminated bool // set true when program finished by a End opcode or stopped by an error.
+	PC         int  // program counter
+
+	Stack     []int
+	Heap      map[int]int
+	CallStack []int
 
 	Seg int // segment number to be loaded
 }
@@ -41,7 +46,7 @@ func New() *VM {
 }
 
 // Load loads code segment to VM
-// return: segment number, read size, error
+// return: segment number, read size and error
 func (vm *VM) Load(code []byte) (int, int, error) {
 	pos := 0
 	defer func() {

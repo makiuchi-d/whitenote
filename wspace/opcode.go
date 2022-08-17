@@ -5,7 +5,7 @@ import "fmt"
 // OpCode is an operation code contains the command and its parameter, and the position of the definition on the loaded code segment.
 type OpCode struct {
 	Cmd   Command
-	Param any // int or string
+	Param any // Number(int) or Label(string)
 
 	Seg int // code segment number
 	Pos int // code position

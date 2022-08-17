@@ -1,3 +1,11 @@
+// Whitespace REPL binary
+//
+// Usage:
+//   wspace <file>
+//     Evaluate the file
+//   wspace
+//     Launch an interactive interpreter
+//
 package main
 
 import (
