@@ -17,6 +17,8 @@ apt install libzmq3-dev libzmq5
 ### Build and install
 
 ```
+git clone https://github.com/Kvieta1990/whitenote.git
+cd whitenote
 go install .
 jupyter kernelspec install --name=whitenote --user ./kernel
 ```
