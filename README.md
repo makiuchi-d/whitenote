@@ -5,6 +5,17 @@ whitenote - The whitespace kernel for Jupyter
 
 ![](jupyter.gif)
 
+## Try with Docker
+
+Docker image avairable: [makiuchid/whitenote](https://hub.docker.com/r/makiuchid/whitenote)
+
+```
+docker run -p 8888:8888 makiuchid/whitenote
+```
+
+Follow the instructions on the screen to access Jupyter lab:
+[http://localhost:8888/lab?token=????????](http://localhost:8888/)
+
 ## Install
 
 ### Required libraries
